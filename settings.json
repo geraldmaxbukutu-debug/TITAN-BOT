@@ -1,9 +1,14 @@
 {
  "botName": "𝐆𝐄𝐑𝐀𝐋𝐃 ⋐⊔⋑",
- "prefix": ["/"]
- "adminIDs": ["61583587555385"],
+ "prefix": ["/"], 
+ "adminIDs": [
+  "61583587555385", 
+  ""
+ ],
  "ownerID": "https://www.facebook.com/KAEL.FROST606",
- "allowedGroups": [],
+ "allowedGroups": [
+  "" 
+ ],
  "language": "en",
  "restartIntervalMinutes": 60,
  "fcaOptions": { 
