@@ -3,7 +3,7 @@
  "prefix": ["/"]
  "adminIDs": ["61583587555385"],
  "ownerID": "https://www.facebook.com/KAEL.FROST606",
- "allowedGroups": [true],
+ "allowedGroups": [],
  "language": "en",
  "restartIntervalMinutes": 60,
  "fcaOptions": { 
