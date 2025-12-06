@@ -95,10 +95,18 @@ const dbHelpers = {
         });
     },
 
-    updateUser: (userID, updateData) => new Promise((resolve, reject) => {
+    updateUser: (userID, updateData) => new Promise(async (resolve, reject) => {
+        const user = await dbHelpers.getUser(userID);
+        if (!user) return reject(new Error(`User with ID ${userID} not found for update.`));
+
         const updates = [];
         const values = [];
-        let dataToStore = updateData.data || {};
+        
+        // Use existing data, and merge with new data if provided
+        let dataToStore = user.data;
+        if (updateData.data) {
+            dataToStore = { ...dataToStore, ...updateData.data };
+        }
 
         for (const [key, value] of Object.entries(updateData)) {
             if (key !== 'data') {
@@ -139,10 +147,18 @@ const dbHelpers = {
         });
     },
 
-    updateGroup: (groupID, updateData) => new Promise((resolve, reject) => {
+    updateGroup: (groupID, updateData) => new Promise(async (resolve, reject) => {
+        const group = await dbHelpers.getGroup(groupID);
+        if (!group) return reject(new Error(`Group with ID ${groupID} not found for update.`));
+
         const updates = [];
         const values = [];
-        let dataToStore = updateData.data || {};
+        
+        // Use existing data, and merge with new data if provided
+        let dataToStore = group.data;
+        if (updateData.data) {
+            dataToStore = { ...dataToStore, ...updateData.data };
+        }
         
         for (const [key, value] of Object.entries(updateData)) {
             if (key === 'admins') {
@@ -378,7 +394,7 @@ async function initializeBot() {
     loadCommands(); 
     loadEvents();   
 
-    figlet("Mateo Bot", (err, data) => {
+    figlet("Titan Bot", (err, data) => {
         if (err) {
             console.error("Error generating banner:", err);
         }
