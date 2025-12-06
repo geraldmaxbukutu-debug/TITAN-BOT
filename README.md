@@ -1,4 +1,4 @@
-🤖 Team Titan Botz - Facebook Messenger Bot
+🤖 **Team Titan Botz** - Facebook Messenger Bot
 Team Titan Botz is a feature-rich, modular, and self-updating bot designed to enhance your Facebook Group and private chat experience. It supports custom prefixes, extensive administrative controls, dynamic commands, and automated code updates.
 ✨ Features
  * Modular Command System: Easily add new features by dropping .js files into the command directory.
@@ -68,6 +68,8 @@ Adding a New Command
  * Create a new file in the src/cmds/ directory (e.g., src/cmds/myCommand.js).
  * Export a module object with the required properties: name, description, role, and the execute function.
 <!-- end list -->
+```
+bash
 // src/cmds/myCommand.js
 module.exports = {
   name: "newcmd",
@@ -80,12 +82,17 @@ module.exports = {
     api.sendMessage("Hello, world!", event.threadID);
   },
 };
+```
 
 Adding a New Event Handler
  * Create a new file in the src/events/ directory (e.g., src/events/myEvent.js).
  * Export a module object with the eventType matching the FCA event you want to capture, and a run function.
 <!-- end list -->
-// src/events/myEvent.js
+
+`src/events/myEvent.js`
+
+```
+bash
 module.exports = {
     eventType: "typ", // Example: "message", "message_event", etc.
     name: "typingIndicator",
@@ -96,5 +103,10 @@ module.exports = {
         }
     }
 };
+```
 
-Don't change my credit
+Don't change our credit
+
+This project workers are
+
+[](my) 
