@@ -1,6 +1,5 @@
 const { exec } = require('child_process');
 const { promisify } = require('util');
-const { logger } = require('./utils/console.js');
 const path = require('path');
 const { restartBot } = require('./index.js'); 
 const execPromise = promisify(exec);
