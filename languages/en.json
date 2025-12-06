@@ -21,7 +21,7 @@
   "usageRemoveGroupAdmin": "Usage: {{prefix}}removegroupadmin <userID>",
   "coinsCheck": "You have {{coins}} coins.",
   "coinsGiven": "Given {{amount}} coins to {{userID}}.",
-  "coinsReward": "Congratulations! You won {{amount}} coins."
+  "coinsReward": "Congratulations! You won {{amount}} coins.", 
   "commandNotFound": "The command {{cmd}} you have used does not exists, as i am a command prompt bot.",
   "welcomeNewMember": "👋 Welcome, {{name}}, to {{group}}! Use {{prefix}}help to see available commands.",
   "memberLeftGroup": "👋 Goodbye, {{name}}. It was a pleasure having you in {{group}}.",
