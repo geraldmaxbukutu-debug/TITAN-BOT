@@ -1,4 +1,3 @@
-const { logger } = require("./utils/console.js");
 const fs = require("fs");
 const path = require("path");
 const gradient = require('gradient-string');
