@@ -2,7 +2,6 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
-const chalk = require('chalk'); // Make sure to npm install chalk
 
 // --- CONFIGURATION ---
 // IMPORTANT: Change 'index.js' to the name of your MAIN bot file (e.g., 'mateo.js')
@@ -41,7 +40,7 @@ app.get('/', (req, res) => {
 });
 
 app.listen(port, () => {
-    console.log(chalk.green(`[Server] Web server running on port ${port}`));
+    console.log(`[Server] Web server running on port ${port}`);
 });
 
 // --- BOT PROCESS MANAGEMENT ---
@@ -52,7 +51,7 @@ const CRASH_THRESHOLD = 10000; // 10 seconds
 function startBot() {
     if (botProcess) return; // Already running
 
-    console.log(chalk.blue(`[Mateo] Spawning ${MAIN_FILE}...`));
+    console.log(`[Mateo] Spawning ${MAIN_FILE}...`);
 
     // Spawn the bot process
     botProcess = spawn('node', [MAIN_FILE], { stdio: 'inherit' });
@@ -64,7 +63,7 @@ function startBot() {
 
         // 1. Crash Loop Detection
         if (code !== 0 && (now - lastCrashTime < CRASH_THRESHOLD)) {
-            console.error(chalk.red(`[Mateo] ⚠️ Bot crashed too quickly (Exit Code: ${code}). Waiting 10 seconds before restart...`));
+            console.error(`[Mateo] ⚠️ Bot crashed too quickly (Exit Code: ${code}). Waiting 10 seconds before restart...`);
             setTimeout(startBot, 10000);
             lastCrashTime = now;
             return;
@@ -74,11 +73,11 @@ function startBot() {
 
         // 2. Standard Restart
         if (code === 0) {
-            console.log(chalk.yellow(`[Mateo] Bot stopped intentionally (Code 0). Restarting...`));
+            console.log(`[Mateo] Bot stopped intentionally (Code 0). Restarting...`);
         } else if (signal === 'SIGTERM' || signal === 'SIGINT') {
-            console.log(chalk.yellow(`[Mateo] Bot was killed by signal. Restarting...`));
+            console.log(`[Mateo] Bot was killed by signal. Restarting...`);
         } else {
-            console.error(chalk.red(`[Mateo] 🚨 Bot crashed with code ${code}. Auto-restarting...`));
+            console.error(`[Mateo] 🚨 Bot crashed with code ${code}. Auto-restarting...`);
         }
         
         startBot();
@@ -90,7 +89,7 @@ function startBot() {
 const restartInterval = (settings.restartIntervalMinutes || 60) * 60 * 1000;
 
 setInterval(() => {
-    console.log(chalk.magenta('[Mateo] ⏰ Triggering scheduled restart...'));
+    console.log('[Mateo] ⏰ Triggering scheduled restart...');
     if (botProcess) {
         // We kill the process; the 'exit' listener above will handle the restart logic automatically
         botProcess.kill('SIGTERM'); 
@@ -105,7 +104,7 @@ startBot();
 // --- GRACEFUL SHUTDOWN ---
 // Kill child process if the launcher is stopped
 process.on('SIGINT', () => {
-    console.log(chalk.yellow('\n[Launcher] Stopping launcher and killing bot process...'));
+    console.log('\n[Launcher] Stopping launcher and killing bot process...');
     if (botProcess) botProcess.kill();
     process.exit();
 });
