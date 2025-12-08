@@ -11,7 +11,7 @@ function restartBot() {
     botProcess.kill('SIGTERM');
     botProcess = null;
   }
-  botProcess = spawn('node', ['gerald.js'], { stdio: 'inherit' });
+  botProcess = spawn('node', ['mateo.js'], { stdio: 'inherit' });
   botProcess.on('exit', (code) => {
     console.log(`[AutoRestart] Bot exited with code ${code}. Restarting...`);
     restartBot(); 
