@@ -18,21 +18,7 @@ const { handleEvent } = require("./utils/eventsHandler");
 const commands = new Map();
 const events = new Map();
 const db = new sqlite3.Database(path.join(__dirname, "bot.db"));
-let settings = {
-    // Default fallback settings to prevent crashes if file is missing
-    prefix: ["!"],
-    language: "en",
-    adminIDs: [],
-    botName: "Titan Bot",
-    fcaOptions: {
-        forceLogin: true,
-        listenEvents: true,
-        logLevel: "silent",
-        updatePresence: true,
-        selfListen: false,
-        online: true
-    }
-};
+const settings = require("./settings.json");
 let lang = {};
 
 const onReplyMap = new Map();
