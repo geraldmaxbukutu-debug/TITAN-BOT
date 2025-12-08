@@ -1,28 +1,49 @@
 const fs = require("fs");
 const path = require("path");
 const gradient = require('gradient-string');
-const chalk = require('chalk'); 
+const chalk = require('chalk');
 const { login } = require("ws3-fca");
 const sqlite3 = require("sqlite3").verbose();
 const figlet = require("figlet");
 const os = require('os');
-const { startUpdater } = require("./updater"); 
+
+// --- UTILITY ---
+const { startUpdater } = require("./updater");
 const { handleCommand } = require("./utils/cmdHandler");
 const { handleEvent } = require("./utils/eventsHandler");
-const { startMonitor, MONITOR_PORT } = require("./utils/monitor");
+// REMOVED: Monitor import unlinked as requested
+// ----------------
+
+// --- 1. Global State and Initialization ---
 const commands = new Map();
 const events = new Map();
-const db = new sqlite3.Database(path.join(__dirname, "bot.db")) ;
-let settings = {};
+const db = new sqlite3.Database(path.join(__dirname, "bot.db"));
+let settings = {
+    // Default fallback settings to prevent crashes if file is missing
+    prefix: ["!"],
+    language: "en",
+    adminIDs: [],
+    botName: "Titan Bot",
+    fcaOptions: {
+        forceLogin: true,
+        listenEvents: true,
+        logLevel: "silent",
+        updatePresence: true,
+        selfListen: false,
+        online: true
+    }
+};
 let lang = {};
 
 const onReplyMap = new Map();
 const onChatMap = new Map();
-const onBootCallbacks = []; 
+const onBootCallbacks = [];
 
+// === 2. SQLite Database Setup ===
 async function setupDatabase() {
     return new Promise((resolve, reject) => {
         db.serialize(() => {
+            // Users Table
             db.run(`CREATE TABLE IF NOT EXISTS users (
                 userID TEXT PRIMARY KEY,
                 name TEXT,
@@ -30,10 +51,9 @@ async function setupDatabase() {
                 createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
                 prefix TEXT,
                 data TEXT
-            )`, (err) => {
-                if (err) return reject(new Error("Failed to create users table: " + err.message));
-            });
+            )`);
 
+            // Groups Table
             db.run(`CREATE TABLE IF NOT EXISTS groups (
                 groupID TEXT PRIMARY KEY,
                 name TEXT,
@@ -41,10 +61,9 @@ async function setupDatabase() {
                 admins TEXT,
                 prefix TEXT,
                 data TEXT
-            )`, (err) => {
-                if (err) return reject(new Error("Failed to create groups table: " + err.message));
-            });
+            )`);
 
+            // History Table
             db.run(`CREATE TABLE IF NOT EXISTS history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 type TEXT,
@@ -53,15 +72,15 @@ async function setupDatabase() {
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 content TEXT
             )`, (err) => {
-                if (err) return reject(new Error("Failed to create history table: " + err.message));
+                if (err) return reject(new Error("Failed to initialize database: " + err.message));
+                console.log(chalk.green("✔ SQLite database initialized successfully."));
+                resolve();
             });
-            
-            console.log("SQLite database initialized successfully.");
-            resolve();
         });
     });
 }
 
+// === 3. Database Helper Functions ===
 const dbHelpers = {
     _processRow: (row) => {
         if (!row) return null;
@@ -70,6 +89,7 @@ const dbHelpers = {
             if (row.admins) row.admins = JSON.parse(row.admins);
         } catch (e) {
             row.data = {};
+            row.admins = [];
         }
         return row;
     },
@@ -80,31 +100,36 @@ const dbHelpers = {
             resolve(dbHelpers._processRow(row));
         });
     }),
-    
+
     createUser: async (userData) => {
-        const existing = await dbHelpers.getUser(userData.userID);
-        if (existing) return existing;
+        // Double check existence to prevent unique constraint errors
+        try {
+            const existing = await dbHelpers.getUser(userData.userID);
+            if (existing) return existing;
+        } catch (e) { /* ignore error, proceed to create */ }
+
         return new Promise((resolve, reject) => {
             const dataStr = JSON.stringify(userData.data || {});
-            db.run("INSERT INTO users (userID, name, coins, data) VALUES (?, ?, ?, ?)", 
-                   [userData.userID, userData.name || "", userData.coins || 0, dataStr], 
-                   function(err) {
-                if (err) return reject(err);
-                resolve({ ...userData, data: JSON.parse(dataStr) });
-            });
+            db.run("INSERT INTO users (userID, name, coins, data) VALUES (?, ?, ?, ?)",
+                [userData.userID, userData.name || "", userData.coins || 0, dataStr],
+                function(err) {
+                    if (err) return reject(err);
+                    resolve({ ...userData, data: JSON.parse(dataStr) });
+                });
         });
     },
 
-    updateUser: (userID, updateData) => new Promise(async (resolve, reject) => {
+    updateUser: async (userID, updateData) => {
+        // ENHANCED: Logic split for better async handling
         const user = await dbHelpers.getUser(userID);
-        if (!user) return reject(new Error(`User with ID ${userID} not found for update.`));
+        if (!user) throw new Error(`User ${userID} not found.`);
 
         const updates = [];
         const values = [];
-        
-        // Use existing data, and merge with new data if provided
-        let dataToStore = user.data;
+        let dataToStore = user.data || {};
+
         if (updateData.data) {
+            // Merge existing data with new data
             dataToStore = { ...dataToStore, ...updateData.data };
         }
 
@@ -114,16 +139,18 @@ const dbHelpers = {
                 values.push(value);
             }
         }
-        
+
         updates.push("data = ?");
         values.push(JSON.stringify(dataToStore));
         values.push(userID);
-        
-        db.run(`UPDATE users SET ${updates.join(", ")} WHERE userID = ?`, values, function(err) {
-            if (err) return reject(err);
-            resolve({ changes: this.changes });
+
+        return new Promise((resolve, reject) => {
+            db.run(`UPDATE users SET ${updates.join(", ")} WHERE userID = ?`, values, function(err) {
+                if (err) return reject(err);
+                resolve({ changes: this.changes });
+            });
         });
-    }),
+    },
 
     getGroup: (groupID) => new Promise((resolve, reject) => {
         db.get("SELECT * FROM groups WHERE groupID = ?", [groupID], (err, row) => {
@@ -133,33 +160,35 @@ const dbHelpers = {
     }),
 
     createGroup: async (groupData) => {
-        const existing = await dbHelpers.getGroup(groupData.groupID);
-        if (existing) return existing;
+        try {
+            const existing = await dbHelpers.getGroup(groupData.groupID);
+            if (existing) return existing;
+        } catch (e) { /* ignore */ }
+
         return new Promise((resolve, reject) => {
             const dataStr = JSON.stringify(groupData.data || {});
             const adminsStr = JSON.stringify(groupData.admins || []);
-            db.run("INSERT INTO groups (groupID, name, admins, data) VALUES (?, ?, ?, ?)", 
-                   [groupData.groupID, groupData.name || "", adminsStr, dataStr], 
-                   function(err) {
-                if (err) return reject(err);
-                resolve({ ...groupData, data: JSON.parse(dataStr) });
-            });
+            db.run("INSERT INTO groups (groupID, name, admins, data) VALUES (?, ?, ?, ?)",
+                [groupData.groupID, groupData.name || "", adminsStr, dataStr],
+                function(err) {
+                    if (err) return reject(err);
+                    resolve({ ...groupData, data: JSON.parse(dataStr) });
+                });
         });
     },
 
-    updateGroup: (groupID, updateData) => new Promise(async (resolve, reject) => {
+    updateGroup: async (groupID, updateData) => {
         const group = await dbHelpers.getGroup(groupID);
-        if (!group) return reject(new Error(`Group with ID ${groupID} not found for update.`));
+        if (!group) throw new Error(`Group ${groupID} not found.`);
 
         const updates = [];
         const values = [];
-        
-        // Use existing data, and merge with new data if provided
-        let dataToStore = group.data;
+        let dataToStore = group.data || {};
+
         if (updateData.data) {
             dataToStore = { ...dataToStore, ...updateData.data };
         }
-        
+
         for (const [key, value] of Object.entries(updateData)) {
             if (key === 'admins') {
                 updates.push("admins = ?");
@@ -169,58 +198,39 @@ const dbHelpers = {
                 values.push(value);
             }
         }
-        
+
         updates.push("data = ?");
         values.push(JSON.stringify(dataToStore));
         values.push(groupID);
-        
-        db.run(`UPDATE groups SET ${updates.join(", ")} WHERE groupID = ?`, values, function(err) {
-            if (err) return reject(err);
-            resolve({ changes: this.changes });
+
+        return new Promise((resolve, reject) => {
+            db.run(`UPDATE groups SET ${updates.join(", ")} WHERE groupID = ?`, values, function(err) {
+                if (err) return reject(err);
+                resolve({ changes: this.changes });
+            });
         });
-    }),
-    
+    },
+
     addToHistory: (historyData) => new Promise((resolve, reject) => {
         db.run("INSERT INTO history (type, senderID, threadID, content) VALUES (?, ?, ?, ?)",
-               [historyData.type, historyData.senderID, historyData.threadID, historyData.content],
-               function(err) {
-            if (err) return reject(err);
-            resolve({ id: this.lastID });
-        });
+            [historyData.type, historyData.senderID, historyData.threadID, historyData.content],
+            function(err) {
+                if (err) return reject(err);
+                resolve({ id: this.lastID });
+            });
     }),
-    
+
     getAllUsers: () => new Promise((resolve, reject) => {
         db.all("SELECT * FROM users", (err, rows) => {
             if (err) return reject(err);
             resolve(rows.map(row => dbHelpers._processRow(row)));
         });
     }),
-    
+
     getAllGroups: () => new Promise((resolve, reject) => {
         db.all("SELECT * FROM groups", (err, rows) => {
             if (err) return reject(err);
             resolve(rows.map(row => dbHelpers._processRow(row)));
-        });
-    }),
-    
-    getRecentHistory: (limit) => new Promise((resolve, reject) => {
-        db.all("SELECT * FROM history ORDER BY timestamp DESC LIMIT ?", [limit], (err, rows) => {
-            if (err) return reject(err);
-            resolve(rows);
-        });
-    }),
-    
-    getGroupCount: () => new Promise((resolve, reject) => {
-        db.get("SELECT COUNT(*) as count FROM groups", (err, row) => {
-            if (err) return reject(err);
-            resolve(row.count);
-        });
-    }),
-    
-    getUserCount: () => new Promise((resolve, reject) => {
-        db.get("SELECT COUNT(*) as count FROM users", (err, row) => {
-            if (err) return reject(err);
-            resolve(row.count);
         });
     }),
     
@@ -239,18 +249,22 @@ const dbHelpers = {
     }),
 };
 
+// === 4. Loaders ===
 function loadSettings() {
     return new Promise((resolve, reject) => {
-        fs.readFile(path.join(__dirname, "settings.json"), "utf8", (err, data) => {
-            if (err) {
-                console.error("❌ Failed to load settings.json:", err);
-                return reject(new Error("Failed to load settings.json"));
-            }
+        const settingsPath = path.join(__dirname, "settings.json");
+        if (!fs.existsSync(settingsPath)) {
+            console.warn(chalk.yellow("⚠ settings.json not found, using defaults."));
+            return resolve(); // Resolve with defaults
+        }
+
+        fs.readFile(settingsPath, "utf8", (err, data) => {
+            if (err) return reject(new Error("Failed to load settings.json"));
             try {
-                settings = JSON.parse(data);
+                const loaded = JSON.parse(data);
+                settings = { ...settings, ...loaded }; // Merge with defaults
                 resolve();
             } catch (e) {
-                console.error("❌ Failed to parse settings.json:", e);
                 reject(new Error("Failed to parse settings.json"));
             }
         });
@@ -258,49 +272,67 @@ function loadSettings() {
 }
 
 function loadLanguage() {
-    function loadLangFile(langCode) {
-        const langPath = path.join(__dirname, "languages", `${langCode}.json`);
-        if (fs.existsSync(langPath)) {
-            return JSON.parse(fs.readFileSync(langPath, "utf8"));
-        }
-        return JSON.parse(fs.readFileSync(path.join(__dirname, "languages", `en.json`), "utf8"));
+    const langCode = settings.language || "en";
+    const langPath = path.join(__dirname, "languages", `${langCode}.json`);
+    const defaultPath = path.join(__dirname, "languages", "en.json");
+
+    if (fs.existsSync(langPath)) {
+        lang = JSON.parse(fs.readFileSync(langPath, "utf8"));
+    } else if (fs.existsSync(defaultPath)) {
+        console.warn(chalk.yellow(`⚠ Language '${langCode}' not found. Falling back to English.`));
+        lang = JSON.parse(fs.readFileSync(defaultPath, "utf8"));
+    } else {
+        lang = {}; // Fallback empty
     }
-    lang = loadLangFile(settings.language);
 }
 
 function loadCommands() {
     const cmdDir = path.join(__dirname, "src", "cmds");
-    if (!fs.existsSync(cmdDir)) return console.warn("[Warning] Commands directory not found. Skipping.");
-    
+    if (!fs.existsSync(cmdDir)) return console.warn(chalk.yellow("[Warning] Commands directory not found."));
+
     const commandFiles = fs.readdirSync(cmdDir).filter((file) => file.endsWith(".js"));
+    let count = 0;
     for (const file of commandFiles) {
-        const command = require(path.join(cmdDir, file));
-        commands.set(command.name, command);
+        try {
+            // Delete cache for hot reloading potential
+            const fullPath = path.join(cmdDir, file);
+            delete require.cache[require.resolve(fullPath)];
+            
+            const command = require(fullPath);
+            if (command.name) {
+                commands.set(command.name, command);
+                count++;
+            }
+        } catch (e) {
+            console.error(chalk.red(`[Error] Failed to load command ${file}:`), e.message);
+        }
     }
-    console.log(`✅ Loaded ${commands.size} command(s).`);
+    console.log(chalk.green(`✔ Loaded ${count} command(s).`));
 }
 
 function loadEvents() {
     const eventsDir = path.join(__dirname, "src", "events");
-    if (!fs.existsSync(eventsDir)) return console.warn("[Warning] Events directory not found. Skipping.");
-    
+    if (!fs.existsSync(eventsDir)) return console.warn(chalk.yellow("[Warning] Events directory not found."));
+
     const eventFiles = fs.readdirSync(eventsDir).filter((file) => file.endsWith(".js"));
+    let count = 0;
     for (const file of eventFiles) {
         try {
             const eventModule = require(path.join(eventsDir, file));
             const eventConfig = eventModule.default || eventModule;
-            
+
             if (eventConfig.eventType && typeof eventConfig.run === 'function') {
                 if (!events.has(eventConfig.eventType)) {
                     events.set(eventConfig.eventType, []);
                 }
                 events.get(eventConfig.eventType).push(eventConfig);
+                count++;
             }
         } catch (e) {
-            console.error(`[Error] Failed to load event file ${file}:`, e);
+            console.error(chalk.red(`[Error] Failed to load event ${file}:`), e.message);
         }
     }
-    console.log(`✅ Loaded ${Array.from(events.values()).flat().length} event handler(s).`);
+    console.log(chalk.green(`✔ Loaded ${count} event handler(s).`));
 }
 
 function getText(key, replacements = {}) {
@@ -311,117 +343,129 @@ function getText(key, replacements = {}) {
     return str;
 }
 
-
+// === 5. Main Login Handler ===
 function loginHandler(err, api) {
-    if (err) return console.error("[Error] Facebook Login Failed:", err);
-    
-    console.log("Successfully logged into Facebook!");
+    if (err) return console.error(chalk.red("[Error] Facebook Login Failed:"), err);
 
+    console.log(chalk.green("✔ Successfully logged into Facebook!"));
+
+    // Set Options safely
     api.setOptions({
-        online: settings.fcaOptions.online,
-        updatePresence: settings.fcaOptions.updatePresence,
-        selfListen: settings.fcaOptions.selfListen,
-        randomUserAgent: false
+        forceLogin: true,
+        listenEvents: true,
+        logLevel: "silent",
+        selfListen: settings.fcaOptions?.selfListen || false,
+        updatePresence: true,
+        online: true,
+        autoMarkDelivery: false, // Recommended to prevent ban
+        userAgent: settings.fcaOptions?.userAgent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     });
-    
-    startMonitor(api, settings); 
 
+    // ENHANCEMENT: Auto-Save AppState every 15 minutes to prevent session loss
+    setInterval(() => {
+        try {
+            const appState = api.getAppState();
+            fs.writeFileSync(path.join(__dirname, "appstate.json"), JSON.stringify(appState, null, 2));
+            // console.log(chalk.gray("Auto-saved AppState.")); // Optional log
+        } catch (e) {
+            console.error("Failed to auto-save appstate:", e);
+        }
+    }, 15 * 60 * 1000);
+
+    // Initial Bot Info Log
     (async () => {
-        const admins = settings.adminIDs.map(id => {
-            const user = dbHelpers.getUser(id);
-            return user ? `${user.name} (${id})` : id;
-        });
+        const admins = settings.adminIDs.map(id => id); // simplified for speed
         
-        console.log(`\nBot Name: ${settings.botName}`);
-        console.log(`Prefix: ${settings.prefix.join(", ")}`);
-        console.log(`Admins: ${admins.join(", ")}`);
-        console.log("The bot has started listening for events...")
-        console.log(`Bot ID: ${api.getCurrentUserID()}`);
+        console.log(gradient.pastel(`\nBot Name: ${settings.botName}`));
+        console.log(chalk.blue(`Prefix: ${settings.prefix.join(", ")}`));
+        console.log(chalk.blue(`Admins: ${admins.length}`));
+        console.log(chalk.cyan("The bot has started listening for events..."));
+        console.log(chalk.gray(`Bot ID: ${api.getCurrentUserID()}`));
     })();
 
-    process.on("SIGINT", async () => {
+    // Graceful Shutdown
+    const cleanShutdown = async (signal) => {
+        console.log(chalk.yellow(`\nReceived ${signal}. Shutting down...`));
         for (const callback of onBootCallbacks) {
             try {
-                await callback("shutdown")
+                await callback("shutdown");
             } catch (e) {
-                console.error("[onBoot] Error:", e)
+                console.error("[onBoot] Error:", e);
             }
         }
-        process.exit(0)
-    })
+        process.exit(0);
+    };
 
-    process.on("SIGTERM", async () => {
-        for (const callback of onBootCallbacks) {
-            try {
-                await callback("shutdown")
-            } catch (e) {
-                console.error("[onBoot] Error:", e)
-            }
-        }
-        process.exit(0)
-    })
+    process.on("SIGINT", () => cleanShutdown("SIGINT"));
+    process.on("SIGTERM", () => cleanShutdown("SIGTERM"));
 
+    // Main Listener
     api.listenMqtt(async (err, event) => {
-        if (err) return console.error("[Error] Failed to listen for events:", err);
+        if (err) return console.error(chalk.red("[Error] Listener:"), err);
 
+        // Handle generic events
         await handleEvent(api, event, events, dbHelpers, settings, getText);
-        
+
+        // Handle Commands
         if (event.type === "message" || event.type === "message_reply") {
-             await handleCommand(
-                api, 
-                event, 
-                commands, 
-                dbHelpers, 
-                settings, 
-                getText, 
-                onReplyMap, 
-                onChatMap, 
+            await handleCommand(
+                api,
+                event,
+                commands,
+                dbHelpers,
+                settings,
+                getText,
+                onReplyMap,
+                onChatMap,
                 onBootCallbacks
             );
         }
     });
 }
 
+// === 6. Initialization ===
 async function initializeBot() {
-    console.log("Starting bot, please wait...")
-    if (!fs.existsSync(path.join(__dirname, 'utils'))) {
-        fs.mkdirSync(path.join(__dirname, 'utils'));
-    }
+    console.clear();
+    console.log(chalk.yellow("Starting bot, please wait..."));
     
+    // Ensure directories exist
+    if (!fs.existsSync(path.join(__dirname, 'utils'))) fs.mkdirSync(path.join(__dirname, 'utils'));
+    if (!fs.existsSync(path.join(__dirname, 'src'))) fs.mkdirSync(path.join(__dirname, 'src'));
+    
+    // Load Core
     await setupDatabase();
-    await loadSettings(); 
+    await loadSettings();
     loadLanguage();
-    loadCommands(); 
-    loadEvents();   
+    loadCommands();
+    loadEvents();
 
     figlet("Titan Bot", (err, data) => {
-        if (err) {
-            console.error("Error generating banner:", err);
-        }
-        else {
-            console.log(gradient.rainbow(chalk.bold(data))); 
-            console.log(chalk.bold.italic.cyan('A cool facinating bot made for managing of accounts and group with commands.'))
-        }
-        
+        if (err) return;
+        console.log(gradient.rainbow(data));
+        console.log(chalk.bold.italic.cyan('A powerful bot for account and group management.'));
     });
 
+    // Login Process
     try {
-        const credsData = await new Promise((resolve, reject) => {
-            fs.readFile("appstate.json", "utf8", (err, data) => {
-                if (err) return reject(err);
-                resolve(data);
-            });
-        });
-
-        const creds = {
-            appState: JSON.parse(credsData),
-        };
-        login(creds, settings.fcaOptions, loginHandler); 
+        const appStatePath = path.join(__dirname, "appstate.json");
         
+        if (!fs.existsSync(appStatePath)) {
+            console.error(chalk.red("❌ appstate.json not found! Please place your appstate file in the root directory."));
+            process.exit(1);
+        }
+
+        const credsData = await fs.promises.readFile(appStatePath, "utf8");
+        const creds = { appState: JSON.parse(credsData) };
+
+        // Start Login
+        login(creds, settings.fcaOptions || {}, loginHandler);
+        
+        // Start Auto-Updater
         startUpdater();
 
     } catch (e) {
-        console.error("❌ Failed to load appstate.json or during login. Ensure appstate.json exists and is valid. Error:", e);
+        console.error(chalk.red("❌ Fatal Error during initialization:"), e.message);
+        console.log(chalk.gray("Tip: Check if appstate.json is valid JSON."));
         process.exit(1);
     }
 }
