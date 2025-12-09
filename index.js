@@ -20,7 +20,7 @@ try {
 
 // --- WEB SERVER (The "Port") ---
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 8888;
 const startTime = Date.now();
 
 app.get('/', (req, res) => {
