@@ -7,7 +7,7 @@ const REPO_DIR = path.resolve(__dirname);
 const BRANCH = 'main';
 const REMOTE = 'origin';
 const INTERVAL_MS = 6 * 60 * 60 * 1000; 
-const REPO_URL = 'https://github.com/your-username/your-repo-name.git'; 
+const REPO_URL = 'https://github.com/geraldmaxbukutu-debug/TITAN-BOT.git'; 
 
 async function gitExecute(command) {
   try {
