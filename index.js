@@ -4,7 +4,7 @@ const fs = require('fs');
 // Removed express/http, as port management must be consolidated in the main bot process
 const settings = JSON.parse(fs.readFileSync('./settings.json', 'utf8'));
 // Ensure the correct bot file is spawned here (was 'gerald.js' in prior code)
-const BOT_FILE = 'main.js'; // Assuming your main bot file is now called main.js/index.js
+const BOT_FILE = 'mateo.js'; // Assuming your main bot file is now called main.js/index.js
 const interval = (settings.restartIntervalMinutes || 60) * 60 * 1000;
 let botProcess;
 
