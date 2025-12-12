@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const gradient = require('gradient-string');
+const chalk = require('chalk'); 
 const { login } = require("ws3-fca");
 const sqlite3 = require("sqlite3").verbose();
 const figlet = require("figlet");
@@ -10,14 +11,13 @@ const os = require('os');
 const { startUpdater } = require("./updater");
 const { handleCommand } = require("./utils/cmdHandler");
 const { handleEvent } = require("./utils/eventsHandler");
-// REMOVED: Monitor import unlinked as requested
 // ----------------
 
 // --- 1. Global State and Initialization ---
 const commands = new Map();
 const events = new Map();
 const db = new sqlite3.Database(path.join(__dirname, "bot.db"));
-const settings = require("./settings.json");
+let settings = {};
 let lang = {};
 
 const onReplyMap = new Map();
@@ -58,7 +58,7 @@ async function setupDatabase() {
                 content TEXT
             )`, (err) => {
                 if (err) return reject(new Error("Failed to initialize database: " + err.message));
-                console.log("✔ SQLite database initialized successfully.");
+                console.log(chalk.green("✔ SQLite database initialized successfully."));
                 resolve();
             });
         });
@@ -87,7 +87,6 @@ const dbHelpers = {
     }),
 
     createUser: async (userData) => {
-        // Double check existence to prevent unique constraint errors
         try {
             const existing = await dbHelpers.getUser(userData.userID);
             if (existing) return existing;
@@ -105,7 +104,6 @@ const dbHelpers = {
     },
 
     updateUser: async (userID, updateData) => {
-        // ENHANCED: Logic split for better async handling
         const user = await dbHelpers.getUser(userID);
         if (!user) throw new Error(`User ${userID} not found.`);
 
@@ -114,7 +112,6 @@ const dbHelpers = {
         let dataToStore = user.data || {};
 
         if (updateData.data) {
-            // Merge existing data with new data
             dataToStore = { ...dataToStore, ...updateData.data };
         }
 
@@ -235,25 +232,16 @@ const dbHelpers = {
 };
 
 // === 4. Loaders ===
-function loadSettings() {
-    return new Promise((resolve, reject) => {
-        const settingsPath = path.join(__dirname, "settings.json");
-        if (!fs.existsSync(settingsPath)) {
-            console.warn("⚠ settings.json not found, using defaults.");
-            return resolve(); // Resolve with defaults
-        }
 
-        fs.readFile(settingsPath, "utf8", (err, data) => {
-            if (err) return reject(new Error("Failed to load settings.json"));
-            try {
-                const loaded = JSON.parse(data);
-                settings = { ...settings, ...loaded }; // Merge with defaults
-                resolve();
-            } catch (e) {
-                reject(new Error("Failed to parse settings.json"));
-            }
-        });
-    });
+function loadSettingsSync() {
+    const settingsPath = path.join(__dirname, "settings.json");
+    if (!fs.existsSync(settingsPath)) {
+        console.warn(chalk.yellow("⚠ settings.json not found! Using hardcoded defaults/empty object."));
+        return {};
+    }
+    // Synchronously read and parse the settings, allowing us to catch the error
+    // before the async bot initialization proceeds.
+    return JSON.parse(fs.readFileSync(settingsPath, "utf8"));
 }
 
 function loadLanguage() {
@@ -264,24 +252,23 @@ function loadLanguage() {
     if (fs.existsSync(langPath)) {
         lang = JSON.parse(fs.readFileSync(langPath, "utf8"));
     } else if (fs.existsSync(defaultPath)) {
-        console.warn(`⚠ Language '${langCode}' not found. Falling back to English.`);
+        console.warn(chalk.yellow(`⚠ Language '${langCode}' not found. Falling back to English.`));
         lang = JSON.parse(fs.readFileSync(defaultPath, "utf8"));
     } else {
-        lang = {}; // Fallback empty
+        lang = {};
     }
 }
 
 function loadCommands() {
     const cmdDir = path.join(__dirname, "src", "cmds");
-    if (!fs.existsSync(cmdDir)) return console.warn("[Warning] Commands directory not found.");
+    if (!fs.existsSync(cmdDir)) return console.warn(chalk.yellow("[Warning] Commands directory not found."));
 
     const commandFiles = fs.readdirSync(cmdDir).filter((file) => file.endsWith(".js"));
     let count = 0;
     for (const file of commandFiles) {
         try {
-            // Delete cache for hot reloading potential
             const fullPath = path.join(cmdDir, file);
-            delete require.cache[require.resolve(fullPath)];
+            delete require.cache[require.resolve(fullPath)]; 
             
             const command = require(fullPath);
             if (command.name) {
@@ -289,15 +276,15 @@ function loadCommands() {
                 count++;
             }
         } catch (e) {
-            console.error(`[Error] Failed to load command ${file}:`, e.message);
+            console.error(chalk.red(`[Error] Failed to load command ${file}:`), e.message);
         }
     }
-    console.log(`✔ Loaded ${count} command(s).`);
+    console.log(chalk.green(`✔ Loaded ${count} command(s).`));
 }
 
 function loadEvents() {
     const eventsDir = path.join(__dirname, "src", "events");
-    if (!fs.existsSync(eventsDir)) return console.warn("[Warning] Events directory not found.");
+    if (!fs.existsSync(eventsDir)) return console.warn(chalk.yellow("[Warning] Events directory not found."));
 
     const eventFiles = fs.readdirSync(eventsDir).filter((file) => file.endsWith(".js"));
     let count = 0;
@@ -314,10 +301,10 @@ function loadEvents() {
                 count++;
             }
         } catch (e) {
-            console.error(`[Error] Failed to load event ${file}:`, e.message);
+            console.error(chalk.red(`[Error] Failed to load event ${file}:`), e.message);
         }
     }
-    console.log(`✔ Loaded ${count} event handler(s).`);
+    console.log(chalk.green(`✔ Loaded ${count} event handler(s).`));
 }
 
 function getText(key, replacements = {}) {
@@ -330,11 +317,12 @@ function getText(key, replacements = {}) {
 
 // === 5. Main Login Handler ===
 function loginHandler(err, api) {
-    if (err) return console.error("[Error] Facebook Login Failed:", err);
+    if (err) return console.error(chalk.red("[Error] Facebook Login Failed:"), err);
 
-    console.log("✔ Successfully logged into Facebook!");
+    console.log(chalk.green("✔ Successfully logged into Facebook!"));
 
-    // Set Options safely
+    const defaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36";
+
     api.setOptions({
         forceLogin: true,
         listenEvents: true,
@@ -342,40 +330,39 @@ function loginHandler(err, api) {
         selfListen: settings.fcaOptions?.selfListen || false,
         updatePresence: true,
         online: true,
-        autoMarkDelivery: false, // Recommended to prevent ban
-        userAgent: settings.fcaOptions?.userAgent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        autoMarkDelivery: false,
+        userAgent: settings.fcaOptions?.userAgent || defaultUserAgent
     });
 
-    // ENHANCEMENT: Auto-Save AppState every 15 minutes to prevent session loss
+    // Auto-Save AppState every 15 minutes
     setInterval(() => {
         try {
             const appState = api.getAppState();
             fs.writeFileSync(path.join(__dirname, "appstate.json"), JSON.stringify(appState, null, 2));
-            // console.log("Auto-saved AppState."); // Optional log
         } catch (e) {
-            console.error("Failed to auto-save appstate:", e);
+            console.error(chalk.red("Failed to auto-save appstate:"), e.message);
         }
     }, 15 * 60 * 1000);
 
     // Initial Bot Info Log
     (async () => {
-        const admins = settings.adminIDs.map(id => id); // simplified for speed
+        const admins = settings.adminIDs || [];
         
-        console.log(gradient.pastel(`\nBot Name: ${settings.botName}`));
-        console.log(`Prefix: ${settings.prefix.join(", ")}`);
-        console.log(`Admins: ${admins.length}`);
+        console.log(gradient.pastel(`\nBot Name: ${settings.botName || 'Mateo Bot'}`));
+        console.log(`Prefix: ${(settings.prefix || []).join(", ")}`);
+        console.log(`Admins Count: ${admins.length}`);
         console.log("The bot has started listening for events...");
         console.log(`Bot ID: ${api.getCurrentUserID()}`);
     })();
 
     // Graceful Shutdown
     const cleanShutdown = async (signal) => {
-        console.log(`\nReceived ${signal}. Shutting down...`);
+        console.log(chalk.cyan(`\nReceived ${signal}. Shutting down...`));
         for (const callback of onBootCallbacks) {
             try {
                 await callback("shutdown");
             } catch (e) {
-                console.error("[onBoot] Error:", e);
+                console.error(chalk.red("[onBoot] Shutdown Error:"), e);
             }
         }
         process.exit(0);
@@ -386,12 +373,10 @@ function loginHandler(err, api) {
 
     // Main Listener
     api.listenMqtt(async (err, event) => {
-        if (err) return console.error("[Error] Listener:", err);
+        if (err) return console.error(chalk.red("[Error] Listener:"), err);
 
-        // Handle generic events
         await handleEvent(api, event, events, dbHelpers, settings, getText);
 
-        // Handle Commands
         if (event.type === "message" || event.type === "message_reply") {
             await handleCommand(
                 api,
@@ -410,47 +395,52 @@ function loginHandler(err, api) {
 
 // === 6. Initialization ===
 async function initializeBot() {
-    console.clear();
-    console.log("Starting bot, please wait...");
-    
-    // Ensure directories exist
-    if (!fs.existsSync(path.join(__dirname, 'utils'))) fs.mkdirSync(path.join(__dirname, 'utils'));
-    if (!fs.existsSync(path.join(__dirname, 'src'))) fs.mkdirSync(path.join(__dirname, 'src'));
-    
-    // Load Core
-    await setupDatabase();
-    await loadSettings();
-    loadLanguage();
-    loadCommands();
-    loadEvents();
-
-    figlet("Titan Bot", (err, data) => {
-        if (err) return;
-        console.log(gradient.rainbow(data));
-        console.log('A powerful bot for account and group management.');
-    });
-
-    // Login Process
     try {
+        console.clear();
+        console.log(chalk.bold("Starting bot, please wait..."));
+
+        // 1. Initial attempt to load settings synchronously
+        settings = loadSettingsSync();
+
+        // 2. Ensure directories exist
+        if (!fs.existsSync(path.join(__dirname, 'utils'))) fs.mkdirSync(path.join(__dirname, 'utils'));
+        if (!fs.existsSync(path.join(__dirname, 'src'))) fs.mkdirSync(path.join(__dirname, 'src'));
+        
+        // 3. Load Core
+        await setupDatabase();
+        loadLanguage();
+        loadCommands();
+        loadEvents();
+
+        figlet("Titan Bot", (err, data) => {
+            if (err) return;
+            console.log(gradient.rainbow(data));
+            console.log(chalk.italic('A powerful bot for account and group management.'));
+        });
+
+        // 4. Login Process
         const appStatePath = path.join(__dirname, "appstate.json");
         
         if (!fs.existsSync(appStatePath)) {
-            console.error("❌ appstate.json not found! Please place your appstate file in the root directory.");
+            console.error(chalk.red("\n❌ appstate.json not found! Please place your appstate file in the root directory."));
             process.exit(1);
         }
 
         const credsData = await fs.promises.readFile(appStatePath, "utf8");
         const creds = { appState: JSON.parse(credsData) };
 
-        // Start Login
         login(creds, settings.fcaOptions || {}, loginHandler);
         
-        // Start Auto-Updater
+        // 5. Start Auto-Updater
         startUpdater();
 
     } catch (e) {
-        console.error("❌ Fatal Error during initialization:", e.message);
-        console.log("Tip: Check if appstate.json is valid JSON.");
+        if (e.message && e.message.includes('settings.json')) {
+            console.error(chalk.red("\n❌ Fatal Error: Failed to load or parse settings.json."));
+            console.log(chalk.yellow("Tip: Ensure settings.json is valid JSON (no trailing commas, all keys/strings double-quoted)."));
+        } else {
+            console.error(chalk.red("\n❌ Fatal Error during initialization:"), e.message);
+        }
         process.exit(1);
     }
 }
